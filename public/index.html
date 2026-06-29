@@ -99,6 +99,13 @@
                         </div>
                         <div class="sub-menu-pane" id="pane-advanced">
                             <div class="adv-setting-group">
+                                <div class="adv-setting-label">Audio Engine</div>
+                            <div class="adv-setting-controls">
+                            <button class="adv-btn active" onclick="setSubStyle('none', 'none', this); openPlayer(null, currentVideoPath, false);">Direct Stream</button>
+                            <button class="adv-btn" onclick="setSubStyle('none', 'none', this); openPlayer(null, currentVideoPath, true);">Transcode (Fix Mute)</button>
+                            </div>
+                        </div>
+                            <div class="adv-setting-group">
                                 <div class="adv-setting-label">Text Scale</div>
                                 <div class="adv-setting-controls">
                                     <button class="adv-btn" onclick="setSubStyle('--cue-size', '0.9rem', this)">Compact</button>

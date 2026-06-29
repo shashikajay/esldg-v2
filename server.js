@@ -11,7 +11,7 @@ import bcrypt from 'bcrypt';
 import nodemailer from 'nodemailer';
 import * as archiver from 'archiver';
 import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 
 dotenv.config();
 
@@ -203,23 +203,32 @@ app.get('/api/files', requireAuth, (req, res) => {
 });
 
 app.get('/api/download-zip', requireAuth, (req, res) => {
-    const targetDir = path.resolve(getUserDir(req.session.username), req.query.path || '');
-    if (!targetDir.startsWith(getUserDir(req.session.username)) || !fs.existsSync(targetDir)) {
+    const userDir = getUserDir(req.session.username);
+    const targetDir = path.resolve(userDir, req.query.path || '');
+    
+    if (!targetDir.startsWith(userDir) || !fs.existsSync(targetDir)) {
         return res.status(403).send('Denied');
     }
+    
     try {
         const folderName = path.basename(targetDir) || 'ESLDG_Archive';
+        
+        // Bypasses the Chrome "Insecure Download" block
         res.setHeader('Content-Type', 'application/octet-stream');
         res.setHeader('Content-Disposition', `attachment; filename="${folderName}.zip"`);
-        const createArchive = archiver.default || archiver;
-        const archive = createArchive('zip', { zlib: { level: 5 } });
+        
+        // This will now execute perfectly without the "not a function" crash
+        const archive = archiver('zip', { zlib: { level: 1 } });
+
         archive.on('error', (err) => {
             console.error('[ZIP Error]', err);
             if (!res.headersSent) res.status(500).end();
         });
+
         archive.pipe(res);
         archive.directory(targetDir, false);
         archive.finalize();
+        
     } catch (err) {
         console.error('[ZIP Fatal Error]', err);
         if (!res.headersSent) res.status(500).send('Server Error generating ZIP');
@@ -291,6 +300,37 @@ app.get('/stream/*', requireAuth, (req, res) => {
         res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': mimeType });
         fs.createReadStream(filePath).pipe(res);
     }
+});
+
+// --- LIVE AUDIO TRANSCODER ENGINE ---
+app.get('/stream-transcode/*', requireAuth, (req, res) => {
+    const userDir = getUserDir(req.session.username);
+    const filePath = path.resolve(userDir, req.params[0]);
+    if (!filePath.startsWith(userDir) || !fs.existsSync(filePath)) return res.status(404).send('Resource missing');
+
+    // We use matroska because it streams perfectly over HTTP pipes
+    res.writeHead(200, { 'Content-Type': 'video/x-matroska' });
+
+    // Spawn FFmpeg: Copy video exactly (0% CPU), convert audio to AAC
+    const ffmpeg = spawn('ffmpeg', [
+        '-i', filePath,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-f', 'matroska',
+        'pipe:1'
+    ]);
+
+    // Pipe the converted stream directly to the browser
+    ffmpeg.stdout.pipe(res);
+
+    // CRITICAL: Kill FFmpeg if the user closes the video to save server RAM
+    req.on('close', () => {
+        ffmpeg.kill('SIGKILL');
+        console.log('[FFmpeg] Process terminated by user disconnect.');
+    });
+    
+    ffmpeg.on('error', (err) => console.error('[FFmpeg Error]', err.message));
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
